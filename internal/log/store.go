@@ -19,13 +19,13 @@ const (
 
 type store struct {
 	*os.File
-	mu sync.Mutex
-	buf *bufio.Writer
+	mu   sync.Mutex
+	buf  *bufio.Writer
 	size uint64
 }
 
-func newStore(f *os.File) (*store, error){
-	// 
+func newStore(f *os.File) (*store, error) {
+	//
 	fi, err := os.Stat(f.Name())
 	if err != nil {
 		return nil, err
@@ -33,28 +33,31 @@ func newStore(f *os.File) (*store, error){
 
 	// get file current size in case we're recreating store from a file with existing data on service restarts
 	size := uint64(fi.Size())
-	
+
 	return &store{
 		File: f,
 		size: size,
-		buf : bufio.NewWriter(f),
+		buf:  bufio.NewWriter(f),
 	}, nil
 }
 
+// Append persists payload and returns record width, byte offset (pos), and error.
+//
 // Record layout on disk:
-// [8-byte metadata length prefix][payload bytes]
+//
+//	[8-byte metadata length prefix][payload bytes]
 //
 // Write path:
-// 1) binary.Write(..., uint64(len(payload))) writes fixed-width metadata bytes.
-// 2) buf.Write(payload) writes raw payload bytes.
-
-func(s *store) Append(payload []byte) (uint64, uint64, error){
+//   - binary.Write(..., uint64(len(payload))) writes fixed-width metadata bytes.
+//   - buf.Write(payload) writes raw payload bytes.
+//   - returns record width, pos, err
+func (s *store) Append(payload []byte) (uint64, uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	pos := s.size
-	
-	// write the length of data as metadata into the buffer. We have to convert our int to bytes first. 
+
+	// write the length of data as metadata into the buffer. We have to convert our int to bytes first.
 	if err := binary.Write(s.buf, encoding, uint64(len(payload))); err != nil {
 		return 0, 0, err
 	}
@@ -73,20 +76,19 @@ func(s *store) Append(payload []byte) (uint64, uint64, error){
 }
 
 // Read path:
-// 1) Flush buffered writes so reads see latest appended records.
-// 2) Read metadata at pos to know payload width.
-// 3) Read payload at pos + metadataWidth.
-//
-// append data then return number of bytes and the position of said data
-func(s *store) Read(pos uint64) ([]byte, error){
+// - Flush buffered writes so reads see latest appended records.
+// - Read metadata at pos to know payload width.
+// - Read payload at pos + metadataWidth.
+// - append data then return number of bytes and the position of said data
+func (s *store) Read(pos uint64) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	// ensures any recent Append data in memory is actually written to disk before reading
 	if err := s.buf.Flush(); err != nil {
 		return nil, err
 	}
-	
+
 	size := make([]byte, metadataWidth)
 	metadataPos := int64(pos)
 	// ReadAt puts the read data into size here
@@ -104,7 +106,7 @@ func(s *store) Read(pos uint64) ([]byte, error){
 }
 
 // reads metadata and record starting at pos given
-func(s *store) ReadAt(pos uint64, bytes []byte) (int, error){
+func (s *store) ReadAt(pos uint64, bytes []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -115,10 +117,9 @@ func(s *store) ReadAt(pos uint64, bytes []byte) (int, error){
 	return s.File.ReadAt(bytes, int64(pos))
 }
 
-func(s *store) Close() error {
+func (s *store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
 
 	// flushing makes sure we write data from memory to disk before closing file
 	if err := s.buf.Flush(); err != nil {
@@ -127,4 +128,3 @@ func(s *store) Close() error {
 
 	return s.File.Close()
 }
-
