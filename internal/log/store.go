@@ -24,8 +24,17 @@ type store struct {
 	size uint64
 }
 
+// newStore wraps an open file as an append-only record store with a buffered writer.
+// It sets the logical store size from the file's current length so reopening an
+// existing file preserves offsets across restarts.
+//
+// Inputs:
+//   - f: open *os.File that will back the store (typically read/write).
+//
+// Outputs:
+//   - *store: initialized store with bufio.Writer and size from Stat.
+//   - error: non-nil if Stat fails or the file cannot be inspected.
 func newStore(f *os.File) (*store, error) {
-	//
 	fi, err := os.Stat(f.Name())
 	if err != nil {
 		return nil, err
@@ -41,16 +50,21 @@ func newStore(f *os.File) (*store, error) {
 	}, nil
 }
 
-// Append persists payload and returns record width, byte offset (pos), and error.
+// Append writes one record: an 8-byte big-endian length prefix followed by payload.
+// It holds the store lock, writes through the buffered writer, and advances the
+// in-memory size. Data may remain buffered until Flush (e.g. from Read, ReadAt, Close).
 //
 // Record layout on disk:
 //
 //	[8-byte metadata length prefix][payload bytes]
 //
-// Write path:
-//   - binary.Write(..., uint64(len(payload))) writes fixed-width metadata bytes.
-//   - buf.Write(payload) writes raw payload bytes.
-//   - returns record width, pos, err
+// Inputs:
+//   - payload: raw record bytes to append after the length prefix.
+//
+// Outputs:
+//   - uint64: payload byte count written (same as len(payload) on success).
+//   - uint64: byte offset (pos) where this record starts in the file before the append.
+//   - error: non-nil if writing metadata or payload fails.
 func (s *store) Append(payload []byte) (uint64, uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -75,11 +89,16 @@ func (s *store) Append(payload []byte) (uint64, uint64, error) {
 	return uint64(recordWidth), pos, nil
 }
 
-// Read path:
-// - Flush buffered writes so reads see latest appended records.
-// - Read metadata at pos to know payload width.
-// - Read payload at pos + metadataWidth.
-// - append data then return number of bytes and the position of said data
+// Read loads a full record starting at pos: it reads the fixed-width length prefix,
+// allocates a buffer of that length, then reads the payload. It flushes first so
+// buffered appends are visible, and uses the store lock for the whole operation.
+//
+// Inputs:
+//   - pos: file byte offset of the record's start (length prefix), as returned by Append.
+//
+// Outputs:
+//   - []byte: decoded payload only (not including the 8-byte prefix).
+//   - error: non-nil on flush failure, short read, or I/O error while reading metadata or payload.
 func (s *store) Read(pos uint64) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -105,8 +124,18 @@ func (s *store) Read(pos uint64) ([]byte, error) {
 	return recordBuffer, nil
 }
 
-// reads metadata and record starting at pos given
-func (s *store) ReadAt(pos uint64, bytes []byte) (int, error) {
+// ReadAt reads up to len(bytes) bytes from the store's backing file at offset,
+// mirroring os.File.ReadAt. It acquires the store lock, flushes any buffered
+// writes so reads see the latest appended data, then delegates to the file.
+//
+// Inputs:
+//   - offset: absolute byte position in the file to read from.
+//   - bytes: destination buffer; at most len(bytes) bytes are read into it.
+//
+// Outputs:
+//   - int: number of bytes read (0 <= n <= len(bytes)).
+//   - error: flush or read failure; may be io.EOF when n < len(bytes) at end of file.
+func (s *store) ReadAt(offset int64, bytes []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -114,9 +143,18 @@ func (s *store) ReadAt(pos uint64, bytes []byte) (int, error) {
 		return 0, err
 	}
 
-	return s.File.ReadAt(bytes, int64(pos))
+	return s.File.ReadAt(bytes, int64(offset))
 }
 
+// Close flushes any buffered writes to disk, then closes the underlying file.
+// It holds the store lock for the duration; after a successful close the store
+// must not be used again.
+//
+// Inputs:
+//   - none: the method has no parameters other than the store receiver.
+//
+// Outputs:
+//   - error: non-nil if Flush fails or the underlying file Close fails.
 func (s *store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
