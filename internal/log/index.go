@@ -2,6 +2,7 @@ package log
 
 import (
 	"os"
+	"sync"
 
 	"github.com/edsrzf/mmap-go"
 )
@@ -71,23 +72,47 @@ type index struct {
 	file *os.File
 	mmap mmap.MMap
 	size uint64
+	mu   sync.Mutex
 }
 
-func newIndex(f *os.File, c Config) (*index, error){
+// Segment holds on-disk size limits for one log segment.
+type Segment struct {
+	MaxIndexBytes uint64
+}
+
+// Config configures index creation.
+type Config struct {
+	Segment Segment
+}
+
+// newIndex opens a memory-mapped index backed by f.
+//
+// The index file is grown (truncated) to Segment.MaxIndexBytes so the mmap
+// covers a fixed upper bound; the logical size before that growth is stored in
+// index.size and restored on Close.
+//
+// Inputs:
+//   - f: an open, writable OS file handle for the index file.
+//   - c: configuration; c.Segment.MaxIndexBytes is the mapped capacity.
+//
+// Outputs:
+//   - *index: a ready-to-use mapped index, or nil on error.
+//   - error: non-nil if stat, truncate, or mmap fails.
+func newIndex(f *os.File, c Config) (*index, error) {
 	idx := &index{
 		file: f,
 	}
-	
+
 	fi, err := os.Stat(f.Name())
 	if err != nil {
-		return nil, err	
+		return nil, err
 	}
 
 	idx.size = uint64(fi.Size())
-	if err = os.Truncate(f.Name(), int64(c.Segment.MaxIndexBytes)); err != nil {
+	if err = idx.file.Truncate(int64(c.Segment.MaxIndexBytes)); err != nil {
 		return nil, err
 	}
-	
+
 	if idx.mmap, err = mmap.Map(idx.file, mmap.RDWR, 0); err != nil {
 		return nil, err
 	}
@@ -95,25 +120,72 @@ func newIndex(f *os.File, c Config) (*index, error){
 	return idx, nil
 }
 
+// Write appends one fixed-width index entry (offset, position) through the mmap.
+// It advances index.size so Close can truncate back to the logical byte length.
+//
+// Inputs:
+//   - off: logical record identifier (stored as uint32).
+//   - pos: byte offset in the store file where the record begins.
+//
+// Outputs:
+//   - error: non-nil if the index is closed or full.
+func (i *index) Write(off uint32, pos uint64) error {
+	return nil
+}
+
+// Read returns the offset and store position for the entry at index n.
+// Entry n occupies bytes [n*entWidth, (n+1)*entWidth) in the index file.
+//
+// Inputs:
+//   - n: zero-based entry index.
+//
+// Outputs:
+//   - uint32: logical record identifier for that entry.
+//   - uint64: byte offset in the store file where the record begins.
+//   - error: non-nil if the index is closed or n is out of range.
+func (i *index) Read(n uint64) (uint32, uint64, error) {
+	return 0, 0, nil
+}
+
+// Close persists mmap changes, shrinks the file back to its logical size, and
+// releases the underlying file handle. The index must not be used after a
+// successful close.
+//
+// Steps:
+//  1. Flush — write dirty mmap pages to the file (msync).
+//  2. Unmap — release the mapping (also flushes remaining dirty pages).
+//  3. Truncate — set file length to index.size, undoing MaxIndexBytes padding.
+//  4. Sync — fsync so data and the truncated size reach stable storage.
+//  5. Close — close the OS file descriptor.
+//
+// Inputs:
+//   - none: the method has no parameters other than the index receiver.
+//
+// Outputs:
+//   - error: non-nil if Flush, Unmap, Truncate, Sync, or Close fails.
 func (i *index) Close() error {
-	// synchronizes the data in memory with data on disk
-	if err := i.mmap.Flush(); err != nil {
-		return err 
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	if i.mmap == nil {
+		return os.ErrClosed
 	}
 
-	if err := i.file.Sync(); err != nil {
+	if err := i.mmap.Flush(); err != nil {
+		return err
+	}
+
+	if err := i.mmap.Unmap(); err != nil {
 		return err
 	}
 
 	if err := i.file.Truncate(int64(i.size)); err != nil {
 		return err
 	}
-	
+
+	if err := i.file.Sync(); err != nil {
+		return err
+	}
+
 	return i.file.Close()
-}
-
-
-
-type Config struct {
-	segment Segment
 }
