@@ -84,7 +84,7 @@ func newIndex(f *os.File, c Config) (*index, error){
 	}
 
 	idx.size = uint64(fi.Size())
-	if err = os.Truncate(f.Name(), int64(c.Segment.MaxIndexBytes),); err != nil {
+	if err = os.Truncate(f.Name(), int64(c.Segment.MaxIndexBytes)); err != nil {
 		return nil, err
 	}
 	
@@ -93,4 +93,27 @@ func newIndex(f *os.File, c Config) (*index, error){
 	}
 
 	return idx, nil
+}
+
+func (i *index) Close() error {
+	// synchronizes the data in memory with data on disk
+	if err := i.mmap.Flush(); err != nil {
+		return err 
+	}
+
+	if err := i.file.Sync(); err != nil {
+		return err
+	}
+
+	if err := i.file.Truncate(int64(i.size)); err != nil {
+		return err
+	}
+	
+	return i.file.Close()
+}
+
+
+
+type Config struct {
+	segment Segment
 }
