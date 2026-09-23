@@ -6,7 +6,7 @@ import (
 )
 
 type Log struct {
-	mu sync.Mutex
+	mu      sync.Mutex
 	records []Record
 }
 
@@ -15,28 +15,28 @@ func NewLog() *Log {
 }
 
 type Record struct {
-	Value 	[]byte `json:"value"`
-	Offset 	uint64 `json:"offset"`
+	Value  []byte `json:"value"`
+	Offset uint64 `json:"offset"`
 }
 
-func (c *Log) Append(record Record) (uint64, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (l *Log) Append(record Record) (uint64, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
-	record.Offset = uint64(len(c.records))
-	c.records = append(c.records, record)
+	record.Offset = uint64(len(l.records))
+	l.records = append(l.records, record)
 	return record.Offset, nil
 }
 
-func (c *Log) Read(offset uint64) (Record, error){
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (l *Log) Read(offset uint64) (Record, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	// checking out of bounds for records array
-	if offset >= uint64(len(c.records)) {
+	if offset >= uint64(len(l.records)) {
 		return Record{}, ErrOffsetNotFound
 	}
-	return c.records[offset], nil
+	return l.records[offset], nil
 }
 
 var ErrOffsetNotFound = fmt.Errorf("offset not found")

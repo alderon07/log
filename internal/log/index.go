@@ -124,12 +124,12 @@ func newIndex(f *os.File, c Config) (*index, error) {
 // It advances index.size so Close can truncate back to the logical byte length.
 //
 // Inputs:
-//   - off: logical record identifier (stored as uint32).
+//   - recordID: logical record identifier (stored as uint32).
 //   - pos: byte offset in the store file where the record begins.
 //
 // Outputs:
 //   - error: non-nil if the index is closed or full.
-func (i *index) Write(off uint32, pos uint64) error {
+func (i *index) Write(recordID uint32, pos uint64) error {
 	return nil
 }
 
