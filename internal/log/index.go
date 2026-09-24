@@ -1,6 +1,7 @@
 package log
 
 import (
+	"io"
 	"os"
 	"sync"
 
@@ -133,18 +134,44 @@ func (i *index) Write(recordID uint32, pos uint64) error {
 	return nil
 }
 
-// Read returns the offset and store position for the entry at index n.
+// Read returns the record_id and store position for the entry at index n.
 // Entry n occupies bytes [n*entWidth, (n+1)*entWidth) in the index file.
 //
 // Inputs:
-//   - n: zero-based entry index.
+//   - in: record number
 //
 // Outputs:
 //   - uint32: logical record identifier for that entry.
 //   - uint64: byte offset in the store file where the record begins.
 //   - error: non-nil if the index is closed or n is out of range.
-func (i *index) Read(n uint64) (uint32, uint64, error) {
-	return 0, 0, nil
+func (i *index) Read(in int64) (out uint32, pos uint64, err error) {
+	if i.size == 0 {
+		return 0, 0, io.EOF
+	}
+
+	// if in == -1, return the last entry in the index (the most recently appended record)
+	//  i.size is always a multiple of entWidth, so (i.size / entWidth) is the number of entries in the index
+	if in == -1 {
+		out = uint32((i.size / entWidth) - 1)
+	} else {
+		out = uint32(in)
+	}
+
+	// get to the starting byte of the entry we want to read, which is the record number times the width of each entry
+	pos = uint64(out) * entWidth
+
+	// bound check: check if the index is closed or if the entry we want to read is out of bounds
+	if i.size < pos+entWidth {
+		return 0, 0, io.EOF
+	}
+
+	// read first 4 bytes of the entry as the record_id (uint32). Use encoding.Uint32 to convert the bytes to uint32.
+	out = encoding.Uint32(i.mmap[pos:offsetWidth])
+
+	// read the next 8 bytes of the entry as the position (uint64). Use encoding.Uint64 to convert the bytes to uint64.
+	pos = encoding.Uint64(i.mmap[pos+offsetWidth : pos+entWidth])
+
+	return out, pos, nil
 }
 
 // Close persists mmap changes, shrinks the file back to its logical size, and
