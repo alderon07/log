@@ -76,16 +76,6 @@ type index struct {
 	mu   sync.Mutex
 }
 
-// Segment holds on-disk size limits for one log segment.
-type Segment struct {
-	MaxIndexBytes uint64
-}
-
-// Config configures index creation.
-type Config struct {
-	Segment Segment
-}
-
 // newIndex opens a memory-mapped index backed by f.
 //
 // The index file is grown (truncated) to Segment.MaxIndexBytes so the mmap
@@ -125,40 +115,50 @@ func newIndex(f *os.File, c Config) (*index, error) {
 // It advances index.size so Close can truncate back to the logical byte length.
 //
 // Inputs:
-//   - recordID: logical record identifier (stored as uint32).
+//   - recordID: logical record identifier/offset (stored as uint32).
 //   - pos: byte offset in the store file where the record begins.
 //
 // Outputs:
 //   - error: non-nil if the index is closed or full.
 func (i *index) Write(recordID uint32, pos uint64) error {
+	if uint64(len(i.mmap)) < i.size+entWidth {
+		return io.EOF
+	}
+
+	// store offset/recordID into the first 4 bytes and pos into the next 8 bytes in mmap
+	encoding.PutUint32(i.mmap[i.size:i.size+offsetWidth], recordID)
+	encoding.PutUint64(i.mmap[i.size+offsetWidth:i.size+entWidth], pos)
+
+	i.size += uint64(entWidth)
 	return nil
 }
 
 // Read returns the record_id and store position for the entry at index n.
 // Entry n occupies bytes [n*entWidth, (n+1)*entWidth) in the index file.
+// -1 will return the last appended entry
 //
 // Inputs:
-//   - in: record number
+//   - recordID: record number
 //
 // Outputs:
 //   - uint32: logical record identifier for that entry.
 //   - uint64: byte offset in the store file where the record begins.
 //   - error: non-nil if the index is closed or n is out of range.
-func (i *index) Read(in int64) (out uint32, pos uint64, err error) {
+func (i *index) Read(recordID int64) (off uint32, pos uint64, err error) {
 	if i.size == 0 {
 		return 0, 0, io.EOF
 	}
 
 	// if in == -1, return the last entry in the index (the most recently appended record)
 	//  i.size is always a multiple of entWidth, so (i.size / entWidth) is the number of entries in the index
-	if in == -1 {
-		out = uint32((i.size / entWidth) - 1)
+	if recordID == -1 {
+		off = uint32((i.size / entWidth) - 1)
 	} else {
-		out = uint32(in)
+		off = uint32(recordID)
 	}
 
 	// get to the starting byte of the entry we want to read, which is the record number times the width of each entry
-	pos = uint64(out) * entWidth
+	pos = uint64(off) * entWidth
 
 	// bound check: check if the index is closed or if the entry we want to read is out of bounds
 	if i.size < pos+entWidth {
@@ -166,12 +166,12 @@ func (i *index) Read(in int64) (out uint32, pos uint64, err error) {
 	}
 
 	// read first 4 bytes of the entry as the record_id (uint32). Use encoding.Uint32 to convert the bytes to uint32.
-	out = encoding.Uint32(i.mmap[pos:offsetWidth])
+	off = encoding.Uint32(i.mmap[pos:offsetWidth])
 
 	// read the next 8 bytes of the entry as the position (uint64). Use encoding.Uint64 to convert the bytes to uint64.
 	pos = encoding.Uint64(i.mmap[pos+offsetWidth : pos+entWidth])
 
-	return out, pos, nil
+	return off, pos, nil
 }
 
 // Close persists mmap changes, shrinks the file back to its logical size, and
@@ -215,4 +215,8 @@ func (i *index) Close() error {
 	}
 
 	return i.file.Close()
+}
+
+func (i *index) Name() string {
+	return i.file.Name()
 }
