@@ -65,11 +65,11 @@ func newStore(f *os.File) (*store, error) {
 //   - uint64: payload byte count written (same as len(payload) on success).
 //   - uint64: byte offset (pos) where this record starts in the file before the append.
 //   - error: non-nil if writing metadata or payload fails.
-func (s *store) Append(payload []byte) (uint64, uint64, error) {
+func (s *store) Append(payload []byte) (payloadLength uint64, pos uint64, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	pos := s.size
+	pos = s.size
 
 	// write the length of data as metadata into the buffer. We have to convert our int to bytes first.
 	if err := binary.Write(s.buf, encoding, uint64(len(payload))); err != nil {
@@ -99,7 +99,7 @@ func (s *store) Append(payload []byte) (uint64, uint64, error) {
 // Outputs:
 //   - []byte: decoded payload only (not including the 8-byte prefix).
 //   - error: non-nil on flush failure, short read, or I/O error while reading metadata or payload.
-func (s *store) Read(pos uint64) ([]byte, error) {
+func (s *store) Read(pos uint64) (payload []byte, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -135,7 +135,7 @@ func (s *store) Read(pos uint64) ([]byte, error) {
 // Outputs:
 //   - int: number of bytes read (0 <= n <= len(bytes)).
 //   - error: flush or read failure; may be io.EOF when n < len(bytes) at end of file.
-func (s *store) ReadAt(offset int64, bytes []byte) (int, error) {
+func (s *store) ReadAt(offset int64, bytes []byte) (numOfBytesRead int, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -155,7 +155,7 @@ func (s *store) ReadAt(offset int64, bytes []byte) (int, error) {
 //
 // Outputs:
 //   - error: non-nil if Flush fails or the underlying file Close fails.
-func (s *store) Close() error {
+func (s *store) Close() (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
