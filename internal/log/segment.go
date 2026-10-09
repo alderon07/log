@@ -1,6 +1,6 @@
 package log
 
-import(
+import (
 	"fmt"
 	"os"
 	"path"
@@ -9,19 +9,19 @@ import(
 	"google.golang.org/protobuf/proto"
 )
 
-// The segment wraps the index and store types to coordinate operations across the two. 
+// The segment wraps the index and store types to coordinate operations across the two.
 // For example, when the log appends a record to the active segment, the segment needs to write the data to its store and add a new entry in the index. Similarly for reads, the segment needs to look up the entry from the index and then fetch the data from the store.
 type segment struct {
-	store *store
-	index *index
+	store                  *store
+	index                  *index
 	baseOffset, nextOffset uint64
-	config Config
+	config                 Config
 }
 
-func newSegment(dir string, baseOffset uint64, c Config) (*segment, error){
+func newSegment(dir string, baseOffset uint64, c Config) (*segment, error) {
 	seg := &segment{
 		baseOffset: baseOffset,
-		config: c,
+		config:     c,
 	}
 
 	var err error
@@ -50,7 +50,7 @@ func newSegment(dir string, baseOffset uint64, c Config) (*segment, error){
 		0644,
 	)
 
-	if err != nil{
+	if err != nil {
 		return nil, err
 	}
 
@@ -60,14 +60,14 @@ func newSegment(dir string, baseOffset uint64, c Config) (*segment, error){
 
 	if off, _, err := seg.index.Read(-1); err != nil {
 		seg.nextOffset = baseOffset
-	}else {
+	} else {
 		seg.nextOffset = baseOffset + uint64(off) + 1
 	}
 
 	return seg, nil
 }
 
-func (s *segment) Append(record *api.Record) (offset uint64, err error){
+func (s *segment) Append(record *api.Record) (offset uint64, err error) {
 	cur := s.nextOffset
 	record.Offset = cur
 
@@ -83,7 +83,7 @@ func (s *segment) Append(record *api.Record) (offset uint64, err error){
 	}
 
 	if err = s.index.Write(
-		uint32(s.nextOffset - uint64(s.baseOffset)),
+		uint32(s.nextOffset-uint64(s.baseOffset)),
 		pos,
 	); err != nil {
 		return 0, err
@@ -93,7 +93,7 @@ func (s *segment) Append(record *api.Record) (offset uint64, err error){
 	return cur, nil
 }
 
-func (s *segment) Read(offset uint64) (record *api.Record, err error){
+func (s *segment) Read(offset uint64) (record *api.Record, err error) {
 	_, pos, err := s.index.Read(int64(offset - s.baseOffset))
 	if err != nil {
 		return nil, err
@@ -108,4 +108,49 @@ func (s *segment) Read(offset uint64) (record *api.Record, err error){
 	err = proto.Unmarshal(payload, record)
 
 	return record, err
+}
+
+func (s *segment) IsMaxed() bool {
+	return s.store.size > s.config.Segment.MaxStoreBytes || s.index.size > s.config.Segment.MaxIndexBytes
+}
+
+func (s *segment) Remove() error {
+	if err := s.Close(); err != nil {
+		return err
+	}
+
+	if err := os.Remove(s.index.Name()); err != nil {
+		return err
+	}
+
+	if err := os.Remove(s.store.Name()); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *segment) Close() error {
+	if err := s.index.Close(); err != nil {
+		return err
+	}
+
+	if err := s.store.Close(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *segment) nearestMultiple(j, k uint64) uint64 {
+	if k == 0 {
+		return j
+	}
+
+	r := j % k
+	if r == 0 {
+		return j
+	}
+
+	return j + k - r
 }

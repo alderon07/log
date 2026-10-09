@@ -5,7 +5,7 @@ package log.v1;
 option go_package = "github.com/alderon07/log/api/v1";
 
 message Record {
-    bytes record = 1;
+    bytes value = 1;
     uint64 offset = 2;
 }
 
