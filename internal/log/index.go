@@ -166,7 +166,7 @@ func (i *index) Read(recordID int64) (off uint32, pos uint64, err error) {
 	}
 
 	// read first 4 bytes of the entry as the record_id (uint32). Use encoding.Uint32 to convert the bytes to uint32.
-	off = encoding.Uint32(i.mmap[pos:offsetWidth])
+	off = encoding.Uint32(i.mmap[pos : pos+offsetWidth])
 
 	// read the next 8 bytes of the entry as the position (uint64). Use encoding.Uint64 to convert the bytes to uint64.
 	pos = encoding.Uint64(i.mmap[pos+offsetWidth : pos+entWidth])

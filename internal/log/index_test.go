@@ -38,7 +38,7 @@ func TestIndexCloseTwice(t *testing.T) {
 	require.ErrorIs(t, idx.Close(), os.ErrClosed)
 }
 
-func TestIndex(t *testing.T){
+func TestIndex(t *testing.T) {
 	f, err := os.CreateTemp(os.TempDir(), "index_test")
 	require.NoError(t, err)
 
@@ -46,7 +46,7 @@ func TestIndex(t *testing.T){
 
 	c := Config{}
 	c.Segment.MaxIndexBytes = 1024
-	
+
 	idx, err := newIndex(f, c)
 	require.NoError(t, err)
 
@@ -55,15 +55,15 @@ func TestIndex(t *testing.T){
 
 	require.Equal(t, f.Name(), idx.Name())
 
-	entries := []struct{
+	entries := []struct {
 		RecordID uint32
-		Pos uint64
+		Pos      uint64
 	}{
 		{RecordID: 0, Pos: 0},
 		{RecordID: 1, Pos: 10},
 	}
 
-	for _, entry := range entries{
+	for _, entry := range entries {
 		err = idx.Write(entry.RecordID, entry.Pos)
 		require.NoError(t, err)
 
@@ -75,7 +75,7 @@ func TestIndex(t *testing.T){
 
 	// index and scanner should error when reading past existing entries
 	_, _, err = idx.Read(int64(len(entries)))
-	require.NoError(t, io.EOF, err)
+	require.ErrorIs(t, err, io.EOF)
 	_ = idx.Close()
 
 	// index should build its state from the existing file
