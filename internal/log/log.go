@@ -53,5 +53,21 @@ func (l *Log) setup() error {
 			return baseOffsets[i] < baseOffsets[j]
 		})
 
+		for i := 0; i < len(baseOffsets); i++ {
+			if err = l.newSegment(baseOffsets[i]); err != nil {
+				return err
+			}
+
+			// baseOffsets contains duplicates because .index and .store both have same baseOffset
+			i++
+		}
+
+		if l.segments == nil {
+			if err = l.newSegment(l.Config.Segment.InitialOffset); err != nil {
+				return err
+			}
+		}
 	}
+
+	return nil
 }
