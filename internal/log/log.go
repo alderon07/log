@@ -1,12 +1,15 @@
 package log
 
 import (
+	"fmt"
 	"os"
 	"path"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+
+	api "github.com/alderon07/log/api/v1"
 )
 
 type Log struct {
@@ -17,6 +20,15 @@ type Log struct {
 	segments      []*segment
 }
 
+// NewLog opens or initializes a log in dir using conf.
+//
+// Inputs:
+//   - dir: directory containing the log's segment files.
+//   - conf: segment size limits and the initial record offset.
+//
+// Outputs:
+//   - *Log: the log instance.
+//   - error: non-nil if the log directory cannot be read or initialized.
 func NewLog(dir string, conf Config) (*Log, error) {
 	if conf.Segment.MaxStoreBytes == 0 {
 		conf.Segment.MaxStoreBytes = 1024
@@ -34,6 +46,10 @@ func NewLog(dir string, conf Config) (*Log, error) {
 	return log, log.setup()
 }
 
+// setup loads the log's segments from its directory.
+//
+// Outputs:
+//   - error: non-nil if the directory cannot be read or a segment cannot be created.
 func (l *Log) setup() error {
 	files, err := os.ReadDir(l.Dir)
 	if err != nil {
@@ -68,6 +84,135 @@ func (l *Log) setup() error {
 			}
 		}
 	}
+	return nil
+}
+
+// Append adds record to the active segment and returns its logical offset in
+// the log. If the active segment reaches its configured size limit, Append
+// creates a new segment starting at the next offset.
+//
+// Inputs:
+//   - record: record data to append.
+//
+// Outputs:
+//   - uint64: the record's logical offset in the log, not a byte position in a file.
+//   - error: non-nil if appending the record or creating a new segment fails.
+func (l *Log) Append(record *api.Record) (offset uint64, err error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	
+	offset, err := l.activeSegment.Append(record)
+	if err != nil {
+		return 0, err
+	}
+
+	if l.activeSegment.IsMaxed() {
+		err = l.newSegment(offset + 1)
+	}
+
+	return offset, err
+}
+
+// Read returns the record at offset, its zero-based logical position in the
+// log. Offset is a record number, not a byte position in a file.
+//
+// Inputs:
+//   - offset: logical record offset to read.
+//
+// Outputs:
+//   - *api.Record: the record at offset, or nil if no segment contains it.
+//   - error: non-nil if offset is out of range or the record cannot be read.
+func (l *Log) Read(offset uint64) (record *api.Record, err error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	// find the correct segment
+	var s *segment
+	for _, segment := range l.segments {
+		if offset >= segment.baseOffset && offset < segment.nextOffset {
+			s = segment
+			break
+		}
+	}
+
+	if s == nil {
+		return nil, fmt.Errorf("offset out of range: %d", offset)
+	}
+
+	return s.Read(offset)
+}
+
+// Close closes every segment in the log.
+//
+// Outputs:
+//   - error: non-nil if closing any segment fails.
+func (l *Log) Close() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	for _, segment := range l.segments {
+		if err := segment.Close(); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
+
+// Remove closes the log and removes its directory and contents.
+//
+// Outputs:
+//   - error: non-nil if closing the log or removing its directory fails.
+func (l *Log) Remove() error {
+	if err := l.Close(); err != nil {
+		return err
+	}
+	return os.RemoveAll(l.Dir)
+}
+
+// Reset removes the log's existing files and initializes it again.
+//
+// Outputs:
+//   - error: non-nil if removing or reinitializing the log fails.
+func (l *Log) Reset() error {
+	if err := l.Remove(); err != nil {
+		return err
+	}
+	return l.setup()
+}
+
+// newSegment creates and adds a segment beginning at offset.
+//
+// Inputs:
+//   - offset: the segment's first logical record offset in the log.
+//
+// Outputs:
+//   - error: non-nil if the segment's index or store cannot be opened.
+// func (l *Log) newSegment(offset uint64) error {
+// 	file, err := os.NewFile()
+// 	index, err := &index{
+
+// 	}
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	store, err := &store{
+
+// 	}
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	seg, err := &segment{
+// 		store,
+// 		index,
+// 		baseOffset,
+// 		nextOffset,
+// 		l.Config,
+// 	}
+
+// 	if err != nil {
+// 		return err
+// 	}
+// }

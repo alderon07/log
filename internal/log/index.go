@@ -76,18 +76,17 @@ type index struct {
 	mu   sync.Mutex
 }
 
-// newIndex opens a memory-mapped index backed by f.
-//
-// The index file is grown (truncated) to Segment.MaxIndexBytes so the mmap
-// covers a fixed upper bound; the logical size before that growth is stored in
-// index.size and restored on Close.
+// newIndex maps the index file opened as f. It records the file's current size,
+// extends the file to Segment.MaxIndexBytes, and maps the resulting file.
+// Close uses the recorded size to truncate the file back to its original
+// logical length.
 //
 // Inputs:
 //   - f: an open, writable OS file handle for the index file.
-//   - c: configuration; c.Segment.MaxIndexBytes is the mapped capacity.
+//   - c: configuration whose Segment.MaxIndexBytes sets the mapped capacity.
 //
 // Outputs:
-//   - *index: a ready-to-use mapped index, or nil on error.
+//   - *index: the memory-mapped index, or nil if initialization fails.
 //   - error: non-nil if stat, truncate, or mmap fails.
 func newIndex(f *os.File, c Config) (*index, error) {
 	idx := &index{
@@ -111,50 +110,51 @@ func newIndex(f *os.File, c Config) (*index, error) {
 	return idx, nil
 }
 
-// Write appends one fixed-width index entry (offset, position) through the mmap.
-// It advances index.size so Close can truncate back to the logical byte length.
+// Write appends an index entry containing offset, the record's logical offset
+// in the log, and pos, the byte position where its data begins in the store file.
+// It returns io.EOF if the mapped index has no room for another entry.
 //
 // Inputs:
-//   - recordID: logical record identifier/offset (stored as uint32).
-//   - pos: byte offset in the store file where the record begins.
+//   - offset: logical record offset in the log, stored as a uint32.
+//   - pos: byte position in the store file where the record begins.
 //
 // Outputs:
-//   - error: non-nil if the index is closed or full.
-func (i *index) Write(recordID uint32, pos uint64) error {
+//   - error: non-nil if the entry cannot be written.
+func (i *index) Write(offset uint32, pos uint64) error {
 	if uint64(len(i.mmap)) < i.size+entWidth {
 		return io.EOF
 	}
 
 	// store offset/recordID into the first 4 bytes and pos into the next 8 bytes in mmap
-	encoding.PutUint32(i.mmap[i.size:i.size+offsetWidth], recordID)
+	encoding.PutUint32(i.mmap[i.size:i.size+offsetWidth], offset)
 	encoding.PutUint64(i.mmap[i.size+offsetWidth:i.size+entWidth], pos)
 
 	i.size += uint64(entWidth)
 	return nil
 }
 
-// Read returns the record_id and store position for the entry at index n.
-// Entry n occupies bytes [n*entWidth, (n+1)*entWidth) in the index file.
-// -1 will return the last appended entry
+// Read returns the logical record offset and store-file position stored in an
+// index entry. offset selects the zero-based entry number; -1 selects the last
+// entry. The returned position is a byte position in the store file.
 //
 // Inputs:
-//   - recordID: record number
+//   - offset: zero-based index entry number, or -1 for the last entry.
 //
 // Outputs:
-//   - uint32: logical record identifier for that entry.
-//   - uint64: byte offset in the store file where the record begins.
-//   - error: non-nil if the index is closed or n is out of range.
-func (i *index) Read(recordID int64) (off uint32, pos uint64, err error) {
+//   - uint32: logical record offset stored in the selected entry.
+//   - uint64: byte position in the store file where that record begins.
+//   - error: io.EOF if the index is empty or the selected entry is out of range.
+func (i *index) Read(offset int64) (off uint32, pos uint64, err error) {
 	if i.size == 0 {
 		return 0, 0, io.EOF
 	}
 
 	// if in == -1, return the last entry in the index (the most recently appended record)
 	//  i.size is always a multiple of entWidth, so (i.size / entWidth) is the number of entries in the index
-	if recordID == -1 {
+	if offset == -1 {
 		off = uint32((i.size / entWidth) - 1)
 	} else {
-		off = uint32(recordID)
+		off = uint32(offset)
 	}
 
 	// get to the starting byte of the entry we want to read, which is the record number times the width of each entry
@@ -217,6 +217,7 @@ func (i *index) Close() error {
 	return i.file.Close()
 }
 
+// Name returns the name of the index file.
 func (i *index) Name() string {
 	return i.file.Name()
 }
