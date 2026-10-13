@@ -228,6 +228,75 @@ mapped memory --mmap.Flush()--> file/OS cache --file.Sync()--> stable storage
 
 In `index.go`, memory mapping lets the program quickly jump to a row in the index. Because every row is 12 bytes, row `n` starts 12 times `n` bytes from the beginning.
 
+## Adapter Pattern
+
+An **adapter** is a small wrapper that makes an existing value usable where a different interface is expected. The existing value does not need to change; the adapter translates calls between the two shapes.
+
+```text
+what the caller expects -> adapter -> what we already have
+```
+
+A practical way to build one:
+
+1. Identify the interface the caller needs.
+2. Identify the methods or behavior the existing type provides.
+3. Write a wrapper that implements the needed interface by calling the existing methods.
+4. Store any extra state needed to translate behavior, such as a current read position.
+
+### Example 1: Read a Store Sequentially
+
+In this log, `store` supports `ReadAt(offset, buffer)`, which reads from a chosen byte position. `io.MultiReader` needs values that implement `io.Reader`, whose `Read` method reads from the current position and advances it. `originReader` adapts between them by keeping its own position:
+
+```go
+type originReader struct {
+    store *store
+    off   int64
+}
+
+func (o *originReader) Read(p []byte) (int, error) {
+    n, err := o.store.ReadAt(o.off, p)
+    o.off += int64(n)
+    return n, err
+}
+```
+
+`Log.Reader` creates one `originReader` per segment and combines them with `io.MultiReader`, so callers can read the segment files as one sequential byte stream.
+
+### Example 2: Adapt a Function to an HTTP Handler
+
+`net/http` expects an `http.Handler`, an interface with a `ServeHTTP` method. The standard library's `http.HandlerFunc` adapts a regular function to that interface:
+
+```go
+handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    fmt.Fprintln(w, "Hello")
+})
+
+http.Handle("/", handler)
+```
+
+The adapter lets a function be used anywhere an `http.Handler` is expected.
+
+### Example 3: Adapt an Existing Logger to `io.Writer`
+
+Suppose an existing logger accepts strings, while another API accepts an `io.Writer`:
+
+```go
+type oldLogger interface {
+    Log(string)
+}
+
+type loggerWriter struct {
+    logger oldLogger
+}
+
+func (w loggerWriter) Write(p []byte) (int, error) {
+    w.logger.Log(string(p))
+    return len(p), nil
+}
+```
+
+Now `loggerWriter` can be passed to code that expects an `io.Writer`, such as `fmt.Fprintln`. This simple adapter treats each `Write` call as one message.
+
 ## Simple Summary
 
 ```text

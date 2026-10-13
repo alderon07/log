@@ -88,6 +88,18 @@ func (l *Log) setup() error {
 	return nil
 }
 
+func (l *Log) newSegment(offset uint64) error {
+	seg, err := newSegment(l.Dir, offset, l.Config)
+	if err != nil {
+		return err
+	}
+
+	l.segments = append(l.segments, seg)
+	l.activeSegment = seg
+
+	return nil
+}
+
 // Append adds record to the active segment and returns its logical offset in
 // the log. If the active segment reaches its configured size limit, Append
 // creates a new segment starting at the next offset.
@@ -224,42 +236,30 @@ func (l *Log) Truncate(lowest uint64) error {
 		return nil
 }
 
+
+
 func (l *Log) Reader() io.Reader {
-	return nil
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	readers := make([]io.Reader, len(l.segments))
+	for i, segment := range l.segments {
+		readers[i] = &originReader{
+			segment.store,
+			0,
+		}
+	}
+	
+	return io.MultiReader(readers...)
 }
 
-// newSegment creates and adds a segment beginning at offset.
-//
-// Inputs:
-//   - offset: the segment's first logical record offset in the log.
-//
-// Outputs:
-//   - error: non-nil if the segment's index or store cannot be opened.
-// func (l *Log) newSegment(offset uint64) error {
-// 	file, err := os.NewFile()
-// 	index, err := &index{
+type originReader struct {
+	*store
+	off int64
+}
 
-// 	}
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	store, err := &store{
-
-// 	}
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	seg, err := &segment{
-// 		store,
-// 		index,
-// 		baseOffset,
-// 		nextOffset,
-// 		l.Config,
-// 	}
-
-// 	if err != nil {
-// 		return err
-// 	}
-// }
+func (o *originReader) Read(p []byte) (int, error){
+	n, err := o.ReadAt(o.off, p)
+	o.off += int64(n)
+	return n, err
+}
