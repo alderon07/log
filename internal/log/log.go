@@ -3,6 +3,7 @@ package log
 import (
 	"fmt"
 	"os"
+	"io"
 	"path"
 	"sort"
 	"strconv"
@@ -203,7 +204,29 @@ func (l *Log) HighestOffset() (offset uint64, err error){
 	return off - 1, nil
 }
 
+func (l *Log) Truncate(lowest uint64) error {
+		l.mu.Lock()
+		defer l.mu.Unlock()
 
+		var s []*segment
+
+		for _, segment := range l.segments {
+			if segment.nextOffset <= lowest + 1 {
+				if err := segment.Remove(); err != nil {
+					return err
+				}
+				continue
+			}
+			s = append(s, segment)
+		}
+
+		l.segments = s
+		return nil
+}
+
+func (l *Log) Reader() io.Reader {
+	return nil
+}
 
 // newSegment creates and adds a segment beginning at offset.
 //
