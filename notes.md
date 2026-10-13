@@ -260,7 +260,14 @@ func (o *originReader) Read(p []byte) (int, error) {
 }
 ```
 
-`Log.Reader` creates one `originReader` per segment and combines them with `io.MultiReader`, so callers can read the segment files as one sequential byte stream.
+`Log.Reader` creates one `originReader` per segment and combines them with `io.MultiReader`, so callers can read the whole log as one sequential byte stream. This capability will be useful when consensus support needs to create snapshots or restore a log.
+
+The wrappers serve two purposes:
+
+1. They implement `io.Reader`, which is the interface required by `io.MultiReader`. A store supports `ReadAt`, so `originReader.Read` adapts that operation into sequential reads.
+2. Each wrapper starts with `off` set to zero. Every `Read` advances `off` by the number of bytes read, so reading begins at the start of each store and continues through its contents until EOF.
+
+`io.MultiReader` exhausts one segment's store before moving on to the next, presenting all the segment stores as a single stream.
 
 ### Example 2: Adapt a Function to an HTTP Handler
 
