@@ -57,32 +57,37 @@ func (l *Log) setup() error {
 		return err
 	}
 
-	var baseOffsets []uint64
+	baseOffsetSet := make(map[uint64]struct{})
 	for _, file := range files {
-		offStr := strings.TrimSuffix(
-			file.Name(),
-			path.Ext(file.Name()),
-		)
-		off, _ := strconv.ParseUint(offStr, 10, 0)
-		baseOffsets = append(baseOffsets, off)
-
-		sort.Slice(baseOffsets, func(i, j int) bool {
-			return baseOffsets[i] < baseOffsets[j]
-		})
-
-		for i := 0; i < len(baseOffsets); i++ {
-			if err = l.newSegment(baseOffsets[i]); err != nil {
-				return err
-			}
-
-			// baseOffsets contains duplicates because .index and .store both have same baseOffset
-			i++
+		ext := path.Ext(file.Name())
+		if ext != ".index" && ext != ".store" {
+			continue
 		}
 
-		if l.segments == nil {
-			if err = l.newSegment(l.Config.Segment.InitialOffset); err != nil {
-				return err
-			}
+		off, err := strconv.ParseUint(strings.TrimSuffix(file.Name(), ext), 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid segment filename %q: %w", file.Name(), err)
+		}
+		baseOffsetSet[off] = struct{}{}
+	}
+
+	baseOffsets := make([]uint64, 0, len(baseOffsetSet))
+	for off := range baseOffsetSet {
+		baseOffsets = append(baseOffsets, off)
+	}
+	sort.Slice(baseOffsets, func(i, j int) bool {
+		return baseOffsets[i] < baseOffsets[j]
+	})
+
+	for _, off := range baseOffsets {
+		if err = l.newSegment(off); err != nil {
+			return err
+		}
+	}
+
+	if len(l.segments) == 0 {
+		if err = l.newSegment(l.Config.Segment.InitialOffset); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -114,16 +119,16 @@ func (l *Log) Append(record *api.Record) (offset uint64, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	
-	offset, err := l.activeSegment.Append(record)
+	off, err := l.activeSegment.Append(record)
 	if err != nil {
 		return 0, err
 	}
 
 	if l.activeSegment.IsMaxed() {
-		err = l.newSegment(offset + 1)
+		err = l.newSegment(off + 1)
 	}
 
-	return offset, err
+	return off, err
 }
 
 // Read returns the record at offset, its zero-based logical position in the
@@ -249,7 +254,7 @@ func (l *Log) Reader() io.Reader {
 			0,
 		}
 	}
-	
+
 	return io.MultiReader(readers...)
 }
 

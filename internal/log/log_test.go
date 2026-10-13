@@ -62,7 +62,7 @@ func testInitExisting(t *testing.T, log *Log) {
 		Value: []byte("BAM!!"),
 	}
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_, err := log.Append(append)
 		require.NoError(t, err)
 	}
@@ -88,6 +88,10 @@ func testInitExisting(t *testing.T, log *Log) {
 	offset, err = nLog.HighestOffset()
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), offset)
+
+	offset, err = nLog.Append(append)
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), offset)
 }
 
 // tests that we can read the full, raw log as it’s stored on disk so that we can snapshot and restore the logs in ​Finite-State Machine​.
@@ -115,7 +119,7 @@ func testTruncate(t *testing.T, log *Log) {
 		Value: []byte("BAM!!"),
 	}
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_, err := log.Append(append)
 		require.NoError(t, err)
 	}
