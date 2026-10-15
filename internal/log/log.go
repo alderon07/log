@@ -2,8 +2,8 @@ package log
 
 import (
 	"fmt"
-	"os"
 	"io"
+	"os"
 	"path"
 	"sort"
 	"strconv"
@@ -13,6 +13,7 @@ import (
 	api "github.com/alderon07/log/api/v1"
 )
 
+// Log manages records across an ordered set of segments.
 type Log struct {
 	mu            sync.RWMutex
 	Dir           string
@@ -48,6 +49,9 @@ func NewLog(dir string, conf Config) (*Log, error) {
 }
 
 // setup loads the log's segments from its directory.
+//
+// Inputs:
+//   - none.
 //
 // Outputs:
 //   - error: non-nil if the directory cannot be read or a segment cannot be created.
@@ -93,6 +97,13 @@ func (l *Log) setup() error {
 	return nil
 }
 
+// newSegment creates a segment at offset and makes it the active segment.
+//
+// Inputs:
+//   - offset: the segment's starting log offset.
+//
+// Outputs:
+//   - error: non-nil if the segment cannot be opened or created.
 func (l *Log) newSegment(offset uint64) error {
 	seg, err := newSegment(l.Dir, offset, l.Config)
 	if err != nil {
@@ -118,7 +129,7 @@ func (l *Log) newSegment(offset uint64) error {
 func (l *Log) Append(record *api.Record) (offset uint64, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	
+
 	off, err := l.activeSegment.Append(record)
 	if err != nil {
 		return 0, err
@@ -199,18 +210,34 @@ func (l *Log) Reset() error {
 	return l.setup()
 }
 
-func (l * Log) LowestOffset() (offset uint64, err error){
+// LowestOffset returns the first log offset still held by the log.
+//
+// Inputs:
+//   - none.
+//
+// Outputs:
+//   - uint64: the base offset of the first segment.
+//   - error: nil.
+func (l *Log) LowestOffset() (offset uint64, err error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
 	return l.segments[0].baseOffset, nil
-	
+
 }
 
-func (l *Log) HighestOffset() (offset uint64, err error){
+// HighestOffset returns the greatest log offset currently held by the log.
+//
+// Inputs:
+//   - none.
+//
+// Outputs:
+//   - uint64: the last record offset in the final segment, or 0 if its next offset is 0.
+//   - error: nil.
+func (l *Log) HighestOffset() (offset uint64, err error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	
+
 	lastIndex := len(l.segments) - 1
 	off := l.segments[lastIndex].nextOffset
 
@@ -221,28 +248,42 @@ func (l *Log) HighestOffset() (offset uint64, err error){
 	return off - 1, nil
 }
 
-func (l *Log) Truncate(lowest uint64) error {
-		l.mu.Lock()
-		defer l.mu.Unlock()
+// Truncate removes complete segments whose records end at or before beforeOffset.
+//
+// Inputs:
+//   - beforeOffset: the greatest log offset to remove.
+//
+// Outputs:
+//   - error: non-nil if removing any segment fails.
+func (l *Log) Truncate(beforeOffset uint64) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
-		var s []*segment
+	var s []*segment
 
-		for _, segment := range l.segments {
-			if segment.nextOffset <= lowest + 1 {
-				if err := segment.Remove(); err != nil {
-					return err
-				}
-				continue
+	for _, segment := range l.segments {
+		if segment.nextOffset <= beforeOffset+1 {
+			if err := segment.Remove(); err != nil {
+				return err
 			}
-			s = append(s, segment)
+			continue
 		}
+		s = append(s, segment)
+	}
 
-		l.segments = s
-		return nil
+	l.segments = s
+	return nil
 }
 
-
-
+// Reader returns a sequential reader over the raw store bytes of all segments
+// in order. The stream includes each record's length prefix and serialized
+// payload, making it suitable for streaming snapshots or restoring a log.
+//
+// Inputs:
+//   - none.
+//
+// Outputs:
+//   - io.Reader: stream of raw bytes from each segment's store, in order.
 func (l *Log) Reader() io.Reader {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -258,12 +299,22 @@ func (l *Log) Reader() io.Reader {
 	return io.MultiReader(readers...)
 }
 
+// originReader adapts a store's random-access ReadAt method to io.Reader while
+// keeping an independent byte offset for sequential reads.
 type originReader struct {
 	*store
 	off int64
 }
 
-func (o *originReader) Read(p []byte) (int, error){
+// Read reads from the current offset and advances it by the number of bytes read.
+//
+// Inputs:
+//   - p: destination buffer for the next bytes.
+//
+// Outputs:
+//   - int: number of bytes read.
+//   - error: non-nil if the read fails or the store is exhausted.
+func (o *originReader) Read(p []byte) (int, error) {
 	n, err := o.ReadAt(o.off, p)
 	o.off += int64(n)
 	return n, err

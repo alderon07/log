@@ -9,6 +9,13 @@ message Record {
     uint64 offset = 2;
 }
 
+service Log {
+    rpc Consume(ConsumeRequest) returns (ConsumeResponse) {}
+    rpc Produce(ProduceRequest) returns (ProduceResponse) {}
+    rpc ConsumeStream(ConsumeRequest) returns (stream ConsumeRequest){}
+    rpc ProduceStream(ProduceRequest) returns (stream ProduceResponse){}
+}
+
 
 
 
