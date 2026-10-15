@@ -16,6 +16,20 @@ service Log {
     rpc ProduceStream(ProduceRequest) returns (stream ProduceResponse){}
 }
 
+message ProduceRequest {
+    Record record = 1;
+}
 
+message ProduceResponse {
+    uint64 offset = 1;
+}
+
+message ConsumeRequest {
+    uint64 offset = 1;
+}
+
+message ConsumeResponse {
+    Record record = 1;
+}
 
 
