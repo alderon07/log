@@ -19,6 +19,18 @@ When reading a record, the segment looks up where the record is in the index, th
 - `index.go` provides a lookup from a segment-local record offset to the record's byte position in that segment's store file.
 - The current HTTP server uses `internal/server/log.go`, which stores records in memory. It is not connected to `store.go` or `index.go` yet.
 
+## gRPC Streaming
+
+`ConsumeStream` is a server-streaming RPC: the client sends one starting offset, and the server sends back each record from that offset onward. After sending the records currently in the log, the stream is meant to stay open and wait for new records to be appended, then send those records too. This makes it useful as a live feed as well as a way to read existing records.
+
+`ProduceStream` is bidirectional: the client can send multiple `ProduceRequest` messages on one stream, and the server processes each one by appending its record to the log. For each successful append, the server sends a `ProduceResponse` containing the assigned offset. The handler can keep receiving and responding until the client finishes sending or the stream is canceled. A normal end-of-input from `Recv` (`io.EOF`) should end the handler successfully; other receive, append, or send errors should be returned.
+
+The gRPC handler should coordinate the network stream and translate between protobuf messages and the log API. The log itself owns the record-reading and append behavior; it should also provide a way for readers to wait for appends instead of having the networking layer repeatedly poll `Read`.
+
+Error handling in the service is currently basic: errors from the log are returned directly from the RPC handler. A more complete service would map expected library errors to appropriate gRPC status codes and avoid exposing internal error details.
+
+The current `CosumeStream` implementation retries when the requested offset is not present, but its `default` select branch means it does not actually block while waiting; it repeatedly polls and can consume CPU. It is also spelled `CosumeStream`, so check that the method name matches the generated `LogServer` interface for the RPC to be registered as its implementation.
+
 ## Store File
 
 Each record in the store file is saved as its length followed by its data. The length tells the program how many bytes belong to that record:

@@ -264,12 +264,12 @@ const file_api_v1_log_proto_rawDesc = "" +
 	"\x0eConsumeRequest\x12\x16\n" +
 	"\x06offset\x18\x01 \x01(\x04R\x06offset\"9\n" +
 	"\x0fConsumeResponse\x12&\n" +
-	"\x06record\x18\x01 \x01(\v2\x0e.log.v1.RecordR\x06record2\x8c\x02\n" +
+	"\x06record\x18\x01 \x01(\v2\x0e.log.v1.RecordR\x06record2\x91\x02\n" +
 	"\x03Log\x12<\n" +
 	"\aConsume\x12\x16.log.v1.ConsumeRequest\x1a\x17.log.v1.ConsumeResponse\"\x00\x12<\n" +
-	"\aProduce\x12\x16.log.v1.ProduceRequest\x1a\x17.log.v1.ProduceResponse\"\x00\x12C\n" +
-	"\rConsumeStream\x12\x16.log.v1.ConsumeRequest\x1a\x16.log.v1.ConsumeRequest\"\x000\x01\x12D\n" +
-	"\rProduceStream\x12\x16.log.v1.ProduceRequest\x1a\x17.log.v1.ProduceResponse\"\x000\x01B!Z\x1fgithub.com/alderon07/log/api/v1b\x06proto3"
+	"\aProduce\x12\x16.log.v1.ProduceRequest\x1a\x17.log.v1.ProduceResponse\"\x00\x12F\n" +
+	"\rConsumeStream\x12\x16.log.v1.ConsumeRequest\x1a\x17.log.v1.ConsumeResponse\"\x00(\x010\x01\x12F\n" +
+	"\rProduceStream\x12\x16.log.v1.ProduceRequest\x1a\x17.log.v1.ProduceResponse\"\x00(\x010\x01B!Z\x1fgithub.com/alderon07/log/api/v1b\x06proto3"
 
 var (
 	file_api_v1_log_proto_rawDescOnce sync.Once
@@ -300,7 +300,7 @@ var file_api_v1_log_proto_depIdxs = []int32{
 	1, // 5: log.v1.Log.ProduceStream:input_type -> log.v1.ProduceRequest
 	4, // 6: log.v1.Log.Consume:output_type -> log.v1.ConsumeResponse
 	2, // 7: log.v1.Log.Produce:output_type -> log.v1.ProduceResponse
-	3, // 8: log.v1.Log.ConsumeStream:output_type -> log.v1.ConsumeRequest
+	4, // 8: log.v1.Log.ConsumeStream:output_type -> log.v1.ConsumeResponse
 	2, // 9: log.v1.Log.ProduceStream:output_type -> log.v1.ProduceResponse
 	6, // [6:10] is the sub-list for method output_type
 	2, // [2:6] is the sub-list for method input_type
