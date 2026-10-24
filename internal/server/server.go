@@ -69,10 +69,11 @@ func (s *grpcServer) CosumeStream(req *api.ConsumeRequest, stream api.Log_Consum
 
 		default:
 			res, err := s.Consume(stream.Context(), req)
-			if err != nil {
-				if errors.Is(err, ErrOffsetOutOfRange) {
-					continue
-				}
+			switch err := err.(type) {
+			case nil:
+			case api.ErrOffsetOutOfRange;
+				continue
+			default:
 				return err
 			}
 
