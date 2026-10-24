@@ -58,6 +58,10 @@ CommitLog interface
 
 In the HTTP path, `http.go` and `log.go` use the local `server.Record` type. In the gRPC path, `server.go` and the `CommitLog` interface use protobuf `*api.Record` values. The interface does not convert between these types; its method signatures require the implementation to use protobuf records. The current `cmd/server/main.go` starts only the HTTP server, so these two paths are not currently wired to share a log instance.
 
+### Why keep an in-memory log?
+
+The disk-backed log is useful when records need to survive a process restart. A simple in-memory log is useful in tests, where test data does not need to persist: tests can create a fresh log without disk setup or cleanup, which can make them faster and more isolated. Ideally, both implementations satisfy the same log interface so the service can use the persistent implementation in production and the in-memory implementation in tests. In the current code, the HTTP server uses the in-memory log, while the gRPC `CommitLog` interface uses protobuf record types, so the in-memory implementation is not yet interchangeable with it.
+
 ## gRPC Streaming
 
 `ConsumeStream` is a server-streaming RPC: the client sends one starting offset, and the server sends back each record from that offset onward. After sending the records currently in the log, the stream is meant to stay open and wait for new records to be appended, then send those records too. This makes it useful as a live feed as well as a way to read existing records.
