@@ -19,6 +19,45 @@ When reading a record, the segment looks up where the record is in the index, th
 - `index.go` provides a lookup from a segment-local record offset to the record's byte position in that segment's store file.
 - The current HTTP server uses `internal/server/log.go`, which stores records in memory. It is not connected to `store.go` or `index.go` yet.
 
+### HTTP and gRPC data flow
+
+The HTTP and gRPC handlers are separate entry points. The HTTP server currently creates and uses its own in-memory `server.Log`; it does not pass records through the gRPC server. The gRPC server depends on a `CommitLog` interface, so a log implementation can be supplied to it without coupling the handler to that implementation.
+
+```text
+HTTP client
+    |
+    | POST /produce: JSON ProduceRequest
+    | GET /consume?offset=N
+    v
+http.go (httpServer)
+    | decode request / encode response
+    | calls Append(record) or Read(offset)
+    v
+log.go (server.Log)  [in-memory records]
+    |
+    | returns offset, Record, or error
+    +-------------------------------> http.go -> HTTP response (JSON)
+
+
+gRPC client
+    |
+    | Produce / Consume protobuf messages
+    v
+server.go (grpcServer)
+    | calls CommitLog.Append(*api.Record)
+    |       or CommitLog.Read(offset)
+    v
+CommitLog interface
+    |
+    +--> a concrete log implementation (for example, internal/log.Log)
+             |
+             +--> returns offset, *api.Record, or error
+    |
+    +--> server.go -> gRPC response or error
+```
+
+In the HTTP path, `http.go` and `log.go` use the local `server.Record` type. In the gRPC path, `server.go` and the `CommitLog` interface use protobuf `*api.Record` values. The interface does not convert between these types; its method signatures require the implementation to use protobuf records. The current `cmd/server/main.go` starts only the HTTP server, so these two paths are not currently wired to share a log instance.
+
 ## gRPC Streaming
 
 `ConsumeStream` is a server-streaming RPC: the client sends one starting offset, and the server sends back each record from that offset onward. After sending the records currently in the log, the stream is meant to stay open and wait for new records to be appended, then send those records too. This makes it useful as a live feed as well as a way to read existing records.
