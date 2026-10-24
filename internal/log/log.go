@@ -165,7 +165,7 @@ func (l *Log) Read(offset uint64) (record *api.Record, err error) {
 	}
 
 	if s == nil {
-		return nil, fmt.Errorf("offset out of range: %d", offset)
+		return nil, api.ErrOffsetOutOfRange{Offset: offset}
 	}
 
 	return s.Read(offset)

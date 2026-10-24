@@ -2,12 +2,9 @@ package server
 
 import (
 	"context"
-	"errors"
 
 	api "github.com/alderon07/log/api/v1"
 )
-
-var ErrOffsetOutOfRange = errors.New("offset out of range")
 
 type Config struct {
 	Log Log
@@ -71,7 +68,7 @@ func (s *grpcServer) CosumeStream(req *api.ConsumeRequest, stream api.Log_Consum
 			res, err := s.Consume(stream.Context(), req)
 			switch err := err.(type) {
 			case nil:
-			case api.ErrOffsetOutOfRange;
+			case api.ErrOffsetOutOfRange:
 				continue
 			default:
 				return err
@@ -83,6 +80,11 @@ func (s *grpcServer) CosumeStream(req *api.ConsumeRequest, stream api.Log_Consum
 			req.Offset++
 		}
 	}
+}
+
+type Log interface {
+	Append(*api.Record) (uint64, error)
+	Read(uint64) (*api.Record, error) 
 }
 
 func toProtoRecord(r Record) *api.Record {
