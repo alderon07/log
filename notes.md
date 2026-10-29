@@ -23,6 +23,10 @@ When reading a record, the segment looks up where the record is in the index, th
 
 The HTTP and gRPC handlers are separate entry points. The HTTP server currently creates and uses its own in-memory `server.Log`; it does not pass records through the gRPC server. The gRPC server depends on a `CommitLog` interface, so a log implementation can be supplied to it without coupling the handler to that implementation.
 
+In the gRPC path, distinguish the gRPC framework server from the Log service implementation. `NewGRPCServer` creates a `*grpc.Server` (often named `gsrv`), which handles incoming gRPC connections and dispatches RPC calls. The `grpcLogService` is the application handler registered with it; its `Produce` and `Consume` methods implement the Log RPCs and use `CommitLog` to access records. `api.RegisterLogServer(gsrv, logService)` connects the service to the framework server. The service embeds `api.UnimplementedLogServer` to provide default behavior for RPC methods it does not implement, and embeds `*Config` so it can access dependencies such as `CommitLog`.
+
+The service methods can be implemented without using gRPC APIs directly. To make the service available over gRPC, the setup has three steps: create a gRPC framework server, register the service implementation with it, and call `Serve` with a network listener. `NewGRPCServer` performs the first two steps and returns the configured but not-yet-serving `*grpc.Server`. Its caller supplies the listener and starts serving, which keeps listener creation under the caller's control (useful, for example, in tests). Once serving, the gRPC server accepts connections, routes requests to the registered service, and sends the service's responses back to clients.
+
 ```text
 HTTP client
     |
@@ -43,7 +47,10 @@ gRPC client
     |
     | Produce / Consume protobuf messages
     v
-server.go (grpcServer)
+grpc.Server (gsrv)
+    | routes RPC calls to the registered service
+    v
+server.go (grpcLogService)
     | calls CommitLog.Append(*api.Record)
     |       or CommitLog.Read(offset)
     v
