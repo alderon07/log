@@ -1,11 +1,9 @@
 package server
 
 import (
-	"context"
-	"io"
-	"os"
 	"net"
 	"os"
+	"io"
 	"testing"
 
 	api "github.com/alderon07/log/api/v1"
@@ -15,20 +13,20 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-func TestServer(t *testing.T){
+func TestServer(t *testing.T) {
 	tests := map[string]func(t *testing.T, client api.LogClient, config *Config){
 		"produce/consume a message to/from the log succeeds": testProduceConsume,
-		"produce/consume stream succeeds": testProduceConsumeStream,
-		"consume past log boundary fails": testConsumePastBoundary,	
+		"produce/consume stream succeeds":                    testProduceConsumeStream,
+		"consume past log boundary fails":                    testConsumePastBoundary,
 	}
-	
+
 	for scenario, test := range tests {
-		t.Run(scenario, func(t *testing.T){
+		t.Run(scenario, func(t *testing.T) {
 			client, config, teardown := setupTest(t, nil)
 			defer teardown()
 			test(t, client, config)
 		})
-	}	
+	}
 }
 
 func setupTest(t *testing.T, fn func(*Config)) (client api.LogClient, config *Config, teardown func()) {
@@ -42,7 +40,33 @@ func setupTest(t *testing.T, fn func(*Config)) (client api.LogClient, config *Co
 	cc, err := grpc.NewClient(l.Addr().String(), clientOptions...)
 	require.NoError(t, err)
 
-	dir, err := os.TempDir()
+	dir, err := os.MkdirTemp("", "server-test")
+	require.NoError(t, err)
 
-	return
+	clog, err := log.NewLog(dir, log.Config{})
+	require.NoError(t, err)
+
+	cfg := &Config{
+		CommitLog: clog,
+	}
+
+	if fn != nil {
+		fn(cfg)
+	}
+
+	server, err := NewGRPCServer(cfg)
+	require.NoError(t, err)
+
+	go func() {
+		server.Serve(l)
+	}()
+
+	client = api.NewLogClient(cc)
+
+	return client, cfg, func() {
+		server.Stop()
+		cc.Close()
+		l.Close()
+		clog.Remove()
+	}
 }

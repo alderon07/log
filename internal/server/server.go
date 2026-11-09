@@ -7,10 +7,10 @@ import (
 	"google.golang.org/grpc"
 )
 
-// using this to abstract the log implementation from the grpc server implementation. This allows us to swap out the log implementation with a different one if we want to, without having to change the grpc server implementation.
+// Keep log storage separate from the gRPC service implementation.
 type CommitLog interface {
 	Append(*api.Record) (uint64, error)
-	Read(uint64) (*api.Record, error) 
+	Read(uint64) (*api.Record, error)
 }
 
 type Config struct {
@@ -19,17 +19,17 @@ type Config struct {
 
 var _ api.LogServer = (*grpcLogService)(nil)
 
-func NewGRPCServer(config *Config) (*grpc.Server, error){
+func NewGRPCServer(config *Config) (*grpc.Server, error) {
 	gsrv := grpc.NewServer()
 	logService, err := newGrpcLogService(config)
 	if err != nil {
-		return nil , err
+		return nil, err
 	}
 
+	// Register the log service so the server can handle its RPCs.
 	api.RegisterLogServer(gsrv, logService)
 	return gsrv, nil
 }
-
 
 type grpcLogService struct {
 	api.UnimplementedLogServer
@@ -47,6 +47,7 @@ func (s *grpcLogService) Produce(ctx context.Context, req *api.ProduceRequest) (
 		return nil, err
 	}
 
+	// Return the offset assigned by the log.
 	return &api.ProduceResponse{Offset: offset}, err
 }
 
@@ -61,6 +62,7 @@ func (s *grpcLogService) Consume(ctx context.Context, req *api.ConsumeRequest) (
 
 func (s *grpcLogService) ProduceStream(stream api.Log_ProduceStreamServer) error {
 	for {
+		// Receive and process one record at a time.
 		req, err := stream.Recv()
 		if err != nil {
 			return err
@@ -71,6 +73,7 @@ func (s *grpcLogService) ProduceStream(stream api.Log_ProduceStreamServer) error
 			return err
 		}
 
+		// Send the offset assigned to this record back to the client.
 		if err = stream.Send(res); err != nil {
 			return err
 		}
@@ -84,6 +87,7 @@ func (s *grpcLogService) CosumeStream(req *api.ConsumeRequest, stream api.Log_Co
 			return nil
 
 		default:
+			// Read the next record, retrying if its offset is not available yet.
 			res, err := s.Consume(stream.Context(), req)
 			switch err := err.(type) {
 			case nil:
@@ -96,24 +100,9 @@ func (s *grpcLogService) CosumeStream(req *api.ConsumeRequest, stream api.Log_Co
 			if err = stream.Send(res); err != nil {
 				return err
 			}
+
+			// Advance so the next iteration reads the following record.
 			req.Offset++
 		}
 	}
 }
-
-// func toProtoRecord(r Record) *api.Record {
-// 	return &api.Record{
-// 		Value:  r.Value,
-// 		Offset: r.Offset,
-// 	}
-// }
-
-// func toLocalRecord(r *api.Record) Record {
-// 	if r == nil {
-// 		return Record{}
-// 	}
-// 	return Record{
-// 		Value:  r.Value,
-// 		Offset: r.Offset,
-// 	}
-// }
