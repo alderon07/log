@@ -29,17 +29,22 @@ func TestServer(t *testing.T) {
 	}
 }
 
+// setupTest starts a log server for a test and returns its client, config, and
+// a teardown function. fn optionally modifies the config before the server starts.
 func setupTest(t *testing.T, fn func(*Config)) (client api.LogClient, config *Config, teardown func()) {
 	// Mark this as a test helper so failures are reported at the caller.
 	t.Helper()
 
+	// Let the OS choose an available port for the test server.
 	l, err := net.Listen("tcp", ":0")
 	require.NoError(t, err)
 	clientOptions := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 
+	// Connect the test client to the listener using insecure local credentials.
 	cc, err := grpc.NewClient(l.Addr().String(), clientOptions...)
 	require.NoError(t, err)
 
+	// Store the test log in a temporary directory.
 	dir, err := os.MkdirTemp("", "server-test")
 	require.NoError(t, err)
 
@@ -57,16 +62,22 @@ func setupTest(t *testing.T, fn func(*Config)) (client api.LogClient, config *Co
 	server, err := NewGRPCServer(cfg)
 	require.NoError(t, err)
 
+	// The go keyword runs Serve in the background; it keeps handling requests
+	// until server.Stop is called.
 	go func() {
 		server.Serve(l)
 	}()
 
+	// Return a client stub and cleanup for resources created by this helper.
 	client = api.NewLogClient(cc)
-
-	return client, cfg, func() {
+	
+	teardown = func() {
+		// Stop makes Serve return, which ends its goroutine.
 		server.Stop()
 		cc.Close()
 		l.Close()
 		clog.Remove()
 	}
+
+	return client, cfg, teardown
 }
