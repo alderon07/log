@@ -80,7 +80,7 @@ func (s *grpcLogService) ProduceStream(stream api.Log_ProduceStreamServer) error
 	}
 }
 
-func (s *grpcLogService) CosumeStream(req *api.ConsumeRequest, stream api.Log_ConsumeStreamServer) error {
+func (s *grpcLogService) ConsumeStream(req *api.ConsumeRequest, stream api.Log_ConsumeStreamServer) error {
 	for {
 		select {
 		case <-stream.Context().Done():

@@ -31,7 +31,7 @@ const (
 type LogClient interface {
 	Consume(ctx context.Context, in *ConsumeRequest, opts ...grpc.CallOption) (*ConsumeResponse, error)
 	Produce(ctx context.Context, in *ProduceRequest, opts ...grpc.CallOption) (*ProduceResponse, error)
-	ConsumeStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ConsumeRequest, ConsumeResponse], error)
+	ConsumeStream(ctx context.Context, in *ConsumeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ConsumeResponse], error)
 	ProduceStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ProduceRequest, ProduceResponse], error)
 }
 
@@ -63,18 +63,24 @@ func (c *logClient) Produce(ctx context.Context, in *ProduceRequest, opts ...grp
 	return out, nil
 }
 
-func (c *logClient) ConsumeStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ConsumeRequest, ConsumeResponse], error) {
+func (c *logClient) ConsumeStream(ctx context.Context, in *ConsumeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ConsumeResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &Log_ServiceDesc.Streams[0], Log_ConsumeStream_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	x := &grpc.GenericClientStream[ConsumeRequest, ConsumeResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
 	return x, nil
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Log_ConsumeStreamClient = grpc.BidiStreamingClient[ConsumeRequest, ConsumeResponse]
+type Log_ConsumeStreamClient = grpc.ServerStreamingClient[ConsumeResponse]
 
 func (c *logClient) ProduceStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ProduceRequest, ProduceResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -95,7 +101,7 @@ type Log_ProduceStreamClient = grpc.BidiStreamingClient[ProduceRequest, ProduceR
 type LogServer interface {
 	Consume(context.Context, *ConsumeRequest) (*ConsumeResponse, error)
 	Produce(context.Context, *ProduceRequest) (*ProduceResponse, error)
-	ConsumeStream(grpc.BidiStreamingServer[ConsumeRequest, ConsumeResponse]) error
+	ConsumeStream(*ConsumeRequest, grpc.ServerStreamingServer[ConsumeResponse]) error
 	ProduceStream(grpc.BidiStreamingServer[ProduceRequest, ProduceResponse]) error
 	mustEmbedUnimplementedLogServer()
 }
@@ -113,7 +119,7 @@ func (UnimplementedLogServer) Consume(context.Context, *ConsumeRequest) (*Consum
 func (UnimplementedLogServer) Produce(context.Context, *ProduceRequest) (*ProduceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Produce not implemented")
 }
-func (UnimplementedLogServer) ConsumeStream(grpc.BidiStreamingServer[ConsumeRequest, ConsumeResponse]) error {
+func (UnimplementedLogServer) ConsumeStream(*ConsumeRequest, grpc.ServerStreamingServer[ConsumeResponse]) error {
 	return status.Error(codes.Unimplemented, "method ConsumeStream not implemented")
 }
 func (UnimplementedLogServer) ProduceStream(grpc.BidiStreamingServer[ProduceRequest, ProduceResponse]) error {
@@ -177,11 +183,15 @@ func _Log_Produce_Handler(srv interface{}, ctx context.Context, dec func(interfa
 }
 
 func _Log_ConsumeStream_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(LogServer).ConsumeStream(&grpc.GenericServerStream[ConsumeRequest, ConsumeResponse]{ServerStream: stream})
+	m := new(ConsumeRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(LogServer).ConsumeStream(m, &grpc.GenericServerStream[ConsumeRequest, ConsumeResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Log_ConsumeStreamServer = grpc.BidiStreamingServer[ConsumeRequest, ConsumeResponse]
+type Log_ConsumeStreamServer = grpc.ServerStreamingServer[ConsumeResponse]
 
 func _Log_ProduceStream_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(LogServer).ProduceStream(&grpc.GenericServerStream[ProduceRequest, ProduceResponse]{ServerStream: stream})
@@ -211,7 +221,6 @@ var Log_ServiceDesc = grpc.ServiceDesc{
 			StreamName:    "ConsumeStream",
 			Handler:       _Log_ConsumeStream_Handler,
 			ServerStreams: true,
-			ClientStreams: true,
 		},
 		{
 			StreamName:    "ProduceStream",

@@ -12,7 +12,9 @@ message Record {
 service Log {
     rpc Consume(ConsumeRequest) returns (ConsumeResponse) {}
     rpc Produce(ProduceRequest) returns (ProduceResponse) {}
-    rpc ConsumeStream(stream ConsumeRequest) returns (stream ConsumeResponse){}
+    // The client sends one starting offset; the server streams records from it onward.
+    rpc ConsumeStream(ConsumeRequest) returns (stream ConsumeResponse){}
+    // The client streams records; the server streams back each record's assigned offset.
     rpc ProduceStream(stream ProduceRequest) returns (stream ProduceResponse){}
 }
 

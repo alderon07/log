@@ -75,6 +75,38 @@ The disk-backed log is useful when records need to survive a process restart. A 
 
 `ProduceStream` is bidirectional: the client can send multiple `ProduceRequest` messages on one stream, and the server processes each one by appending its record to the log. For each successful append, the server sends a `ProduceResponse` containing the assigned offset. The handler can keep receiving and responding until the client finishes sending or the stream is canceled. A normal end-of-input from `Recv` (`io.EOF`) should end the handler successfully; other receive, append, or send errors should be returned.
 
+In a protobuf RPC declaration, `stream` applies to the message direction where it appears:
+
+- No `stream` on the request means the client sends one request.
+- `stream` on the response means the server can send multiple responses.
+- `stream` on both means both sides can send multiple messages over the same RPC.
+
+The two RPCs therefore have different message flows:
+
+```text
+ConsumeStream: one client request, many server responses
+
+Client                                      Server
+  |                                            |
+  |--- ConsumeRequest(offset=0) ------------->|
+  |<-- ConsumeResponse(record at offset 0) ---|
+  |<-- ConsumeResponse(record at offset 1) ---|
+  |<-- ... -----------------------------------|
+
+
+ProduceStream: many client requests and many server responses
+
+Client                                      Server
+  |                                            |
+  |--- ProduceRequest(record A) ------------->|
+  |<-- ProduceResponse(offset A) -------------|
+  |--- ProduceRequest(record B) ------------->|
+  |<-- ProduceResponse(offset B) -------------|
+  |                                            |
+```
+
+In the `.proto` declarations, `ConsumeStream(ConsumeRequest)` has one request because that type is not prefixed by `stream`; its response is streamed. `ProduceStream(stream ProduceRequest)` accepts streamed requests, and its streamed response allows the server to send multiple acknowledgments. The stream keyword does not change the message type; it changes whether that side sends one message or a sequence of messages.
+
 The gRPC handler should coordinate the network stream and translate between protobuf messages and the log API. The log itself owns the record-reading and append behavior; it should also provide a way for readers to wait for appends instead of having the networking layer repeatedly poll `Read`.
 
 Error handling in the service is currently basic: errors from the log are returned directly from the RPC handler. A more complete service would map expected library errors to appropriate gRPC status codes and avoid exposing internal error details.
